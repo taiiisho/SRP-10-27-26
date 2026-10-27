@@ -385,7 +385,50 @@ def _add_train_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--models-root", help="where models are written (default: paths.models_dir)")
 
 
+@command("evaluate", "compare all models on the test trials: statistics, plots and summary.md")
+def cmd_evaluate(args, cfg) -> int:
+    from .evaluation import run_evaluation
+
+    out = run_evaluation(
+        cfg, args.dataset, models_dir=args.models_dir, out_dir=args.out, split=args.split,
+        include_dev=not args.no_dev, allow_mixed_synthetic=args.allow_mixed_synthetic or None,
+    )
+    print(out / "summary.md")
+    return 0
+
+
+def _add_evaluate_args(p: argparse.ArgumentParser) -> None:
+    p.add_argument("--dataset", default="data/processed/main", help="processed dataset folder")
+    p.add_argument("--models-dir", help="trained models (default: paths.models_dir/<dataset name>)")
+    p.add_argument("--out", help="results folder (default: paths.results_dir/<dataset name>)")
+    p.add_argument("--split", choices=["test", "dev"], default="test",
+                   help="test = the real result; dev = development diagnostics (models were trained on these)")
+    p.add_argument("--no-dev", action="store_true", help="skip the overfitting diagnostic on development trials")
+    p.add_argument("--allow-mixed-synthetic", action="store_true", help="DANGER: evaluate a mixed dataset")
+
+
+@command("selftest", "run the whole pipeline on SYNTHETIC data in a scratch folder (no camera needed)")
+def cmd_selftest(args, cfg) -> int:
+    import tempfile
+
+    from .selftest import run_selftest
+
+    workdir = Path(args.workdir) if args.workdir else Path(tempfile.mkdtemp(prefix="handpredict_selftest_"))
+    result = run_selftest(cfg, workdir, n_trials=args.trials, quick=not args.full)
+    print(result["summary"].read_text())
+    print(f"\nSelf-test files: {workdir}")
+    return 0
+
+
+def _add_selftest_args(p: argparse.ArgumentParser) -> None:
+    p.add_argument("--workdir", help="scratch folder (default: a new temporary folder)")
+    p.add_argument("--trials", type=int, default=27, help="number of synthetic trials (default 27)")
+    p.add_argument("--full", action="store_true", help="use the full training budget from the config (slow)")
+
+
 ARGUMENT_BUILDERS = {
+    "selftest": _add_selftest_args,
+    "evaluate": _add_evaluate_args,
     "build-dataset": _add_build_dataset_args,
     "train": _add_train_args,
     "download-models": _add_download_args,
