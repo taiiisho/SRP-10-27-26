@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Virtual environments
+.venv/
+venv/
+
+# Study data, trained models and results are produced on the Pi / laptop and
+# should be backed up separately (USB stick / storage device), not committed:
+# they can contain participant data and they are large.
+data/
+models/
+results/
+*.hef
+*.task
+*.onnx
+*.pt
+*.mp4
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store

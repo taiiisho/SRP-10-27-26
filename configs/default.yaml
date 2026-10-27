@@ -1,0 +1,333 @@
+# =============================================================================
+# Default configuration for the hand-trajectory prediction study.
+#
+# Every tunable number lives here, not in the code. A full copy of the config
+# is saved into every session.json, every model folder and every results
+# folder, so any number in the write-up can be traced back to its settings.
+#
+# Change a value for one run without editing this file:
+#   handpredict evaluate --set evaluation.bootstrap_samples=2000
+# =============================================================================
+
+study:
+  name: hand-trajectory-prediction
+  # One seed drives every random choice (trial order, train/test split,
+  # network initialisation, bootstrap). Same seed + same data = same results.
+  seed: 20261027
+
+paths:
+  raw_dir: data/raw                 # one folder per recording session (never edited)
+  processed_dir: data/processed     # output of `build-dataset`
+  models_dir: models                # output of `train`
+  results_dir: results              # output of `evaluate`
+  detector_models_dir: models/detectors   # downloaded hand-landmark models
+
+# -----------------------------------------------------------------------------
+# Camera: a CONTROLLED VARIABLE. Keep these identical for the whole study.
+# -----------------------------------------------------------------------------
+camera:
+  source: picamera2          # picamera2 | opencv (USB webcam) | video | synthetic
+  width: 1280
+  height: 720
+  fps: 60                    # 30 fps is too coarse: a 50 ms horizon would be only 1.5 frames
+  # Camera Module 3 (IMX708) can only reach 60 fps in its binned 1536x864
+  # sensor mode (up to ~120 fps); the 2304x1296 mode tops out at ~56 fps.
+  # The ISP scales the sensor image to width x height. VERIFY ON HARDWARE.
+  sensor_output_size: [1536, 864]
+  exposure:
+    mode: fixed              # fixed | lock_after_auto
+    exposure_time_us: 4000   # short exposure = less motion blur (needs good light)
+    analogue_gain: 4.0
+  white_balance:
+    mode: lock_after_auto    # fixed | lock_after_auto (measure once, then freeze)
+    colour_gains: [1.8, 1.6] # (red, blue) used when mode = fixed
+  focus:
+    mode: manual             # manual | auto (manual keeps focus constant)
+    lens_position_dioptres: 1.0   # 1 / distance in metres -> 1.0 = focused at 1 m
+  settle_s: 1.0              # let auto-exposure / white balance settle before locking
+  buffer_count: 6
+  # Camera placement: a CONTROLLED VARIABLE. Measure it with the tape once and
+  # keep it identical; it is stored in every session.json and compared when
+  # sessions are merged.
+  pose:
+    distance_cm: 100         # lens to the plane the hand moves in
+    height_cm: null          # lens height above the table
+    tilt_deg: null           # 0 = looking straight down / straight at the plane
+    notes: ""
+  opencv_device: 0           # /dev/video0 for USB webcams
+  opencv_fourcc: MJPG        # most webcams only reach high fps with MJPG
+  opencv_api: any            # any | v4l2
+
+# The single landmark measured in every frame: a CONTROLLED VARIABLE.
+landmark:
+  index: 9                   # MediaPipe hand landmark 9 = middle-finger MCP (knuckle)
+  name: MIDDLE_FINGER_MCP    # more stable than a fingertip when the fingers flex
+
+# -----------------------------------------------------------------------------
+# Hand-landmark detector (the measuring instrument).
+# -----------------------------------------------------------------------------
+detector:
+  backend: mediapipe         # mediapipe (CPU) | hailo (AI HAT+ 2) | synthetic (tests only)
+  fallback_to_cpu: true      # if the Hailo device is missing, use MediaPipe and log it
+  mediapipe:
+    model_path: models/detectors/hand_landmarker.task
+    model_url: https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/latest/hand_landmarker.task
+    num_hands: 1
+    min_hand_detection_confidence: 0.5
+    min_hand_presence_confidence: 0.5
+    min_tracking_confidence: 0.5
+  hailo:
+    # Hailo Model Zoo "hand_landmark_lite" (MediaPipe's landmark network
+    # compiled for the Hailo-10H). The HEF must match the HailoRT version
+    # installed on the Pi; change the version in the URL if they differ.
+    hef_path: models/detectors/hand_landmark_lite_hailo10h.hef
+    hef_url: https://hailo-model-zoo.s3.eu-west-2.amazonaws.com/ModelZoo/Compiled/v5.4.0/hailo10h/hand_landmark_lite.hef
+    input_size: 224
+    presence_threshold: 0.5
+    # The Hailo model only finds landmarks inside a square crop around the
+    # hand. Like MediaPipe, the crop for the next frame is built from this
+    # frame's landmarks (scale 2.0, shifted 10 % towards the fingers).
+    roi_scale: 2.0
+    roi_shift_y: -0.1
+    # Where to look when the hand is lost: the calibrated start region, the
+    # whole frame, or MediaPipe on the CPU (most robust, but uses the CPU).
+    reacquire: start_region   # start_region | full_frame | mediapipe
+    reacquire_size_px: 360    # side of the square search crop around the start region
+    # While searching, try the crop at these rotations and sizes (the network
+    # needs an upright hand of about the right size); the best one wins.
+    search_angles_deg: [0, 90, -90, 180]
+    search_scales: [0.75, 1.0, 1.33]
+    # Names of the HEF outputs. null = recognise them by shape and value range
+    # (run `handpredict check-hardware --hef ...` to print the real names).
+    output_map: null
+    timeout_ms: 1000
+  synthetic:
+    noise_px: 1.5            # Gaussian measurement noise (std per axis)
+    miss_probability: 0.01   # chance a frame has no detection
+    outlier_probability: 0.002
+    outlier_px: 25
+
+calibration:
+  default_start_radius_px: 60
+  default_target_radius_px: 50
+  hold_s: 1.0                # --capture-targets: how long the hand is held still at each target
+
+# -----------------------------------------------------------------------------
+# Trial recording.
+# -----------------------------------------------------------------------------
+recording:
+  countdown_s: 3             # "3, 2, 1" before recording starts
+  pre_roll_s: 0.5            # recorded BEFORE "GO": a still baseline for onset detection
+  duration_s: 2.5            # recorded AFTER "GO"
+  stop_when_settled: false   # true: stop early once the hand rests at the target
+  settle_speed_cm_s: 6.0     # "at rest" = slower than this (must be above a still hand's jitter)
+  settle_time_s: 0.1         # ... for this long, inside the target region
+  post_settle_s: 0.6         # keep recording after settling: ground truth for the 500 ms horizon
+  max_duration_s: 6.0        # hard limit when stop_when_settled is true
+  max_queue_frames: 400      # frames waiting for the detector (memory cap, ~1.1 GB at 720p)
+  max_gap_frames: 3          # gaps of <= 3 missing frames are interpolated and flagged
+  max_bad_frame_fraction: 0.15   # trials with more missing/interpolated frames are discarded
+  save_video: false          # privacy: only coordinates are stored unless --save-video
+  video_codec: mp4v
+  # Trial plan: every (speed, target) combination `repetitions` times, in a
+  # shuffled order (shuffling avoids learning/fatigue effects lining up with
+  # one condition).
+  protocol:
+    speeds: [slow, medium, fast]
+    targets: [T1, T2, T3]
+    repetitions: 4
+
+# -----------------------------------------------------------------------------
+# Kinematics: CAUSAL filtering (only past samples), velocity, acceleration,
+# movement segmentation and ground truth.
+# -----------------------------------------------------------------------------
+kinematics:
+  filter: kalman_ca          # kalman_ca | causal_polyfit
+  kalman_ca:
+    # Constant-acceleration Kalman filter. jerk_psd is how quickly the filter
+    # believes acceleration can change (bigger = less lag but more noise).
+    # 1e5 was chosen on SYNTHETIC reaches (before any real data existed) as the
+    # value that keeps a still hand below the onset threshold for detector
+    # jitter up to ~0.15 cm while lagging as little as possible.
+    jerk_psd_cm2_s5: 1.0e+5
+    measurement_std_cm: 0.15 # typical detector jitter (std per axis)
+    initial_velocity_std_cm_s: 10.0
+    initial_acceleration_std_cm_s2: 100.0
+  causal_polyfit:
+    # Fit a parabola to the last `window` samples and read position, velocity
+    # (slope) and acceleration (curvature) at the newest sample.
+    window: 9
+    order: 2
+  segmentation:
+    # Hysteresis: movement starts when speed > onset for N frames and ends when
+    # speed < offset (a lower threshold) for M frames. A filtered speed is never
+    # exactly zero (detector jitter), so the thresholds must sit above the
+    # jitter of a still hand: check the segmentation plots made by
+    # `build-dataset` and adjust these BEFORE looking at any prediction errors.
+    onset_speed_cm_s: 10.0
+    offset_speed_cm_s: 6.0
+    onset_min_frames: 3
+    offset_min_frames: 6
+  ground_truth:
+    # Ground truth at t+h = linear interpolation of raw measured positions; it
+    # is only valid if the two neighbouring measurements are at most this far apart.
+    max_gap_ms: 70
+
+# -----------------------------------------------------------------------------
+# The independent variable: prediction horizons.
+# -----------------------------------------------------------------------------
+horizons_ms: [50, 100, 150, 200, 300, 400, 500]
+required_horizons_ms: [50, 100, 200]
+
+# -----------------------------------------------------------------------------
+# Physics models.
+# -----------------------------------------------------------------------------
+physics:
+  # Decided BEFORE looking at any test result: the headline physics model.
+  headline: minimum_jerk_euler
+  models:
+    - zero_motion                    # "stay where you are": the sanity floor
+    - constant_velocity
+    - euler_constant_acceleration    # Newton-Euler stepping with constant a
+    - minimum_jerk_closed            # Flash & Hogan polynomial, closed form
+    - minimum_jerk_euler             # same fit, rolled forward with Euler steps (HEADLINE)
+    - minimum_jerk_replan            # extra row: re-planned from the measured state (Hoff & Arbib 1993)
+    - minimum_jerk_free_target       # ablation: also fits the end point
+  euler:
+    dt_ms: 1.0                       # internal Euler step for the constant-acceleration model
+    acceleration_decay_tau_ms: null  # null = constant a (as in the proposal); e.g. 150 = decaying a
+  minimum_jerk:
+    euler_dt_ms: 0.1                 # internal step for the Euler-rolled minimum-jerk model
+    min_samples_after_onset: 6       # fewer samples -> fall back to constant velocity
+    # Start point x0 = median position from 400 ms to 150 ms before the detected
+    # onset. The onset is detected ~60-180 ms late (the speed has to pass the
+    # threshold first), so the last 150 ms may already contain movement.
+    baseline_window_ms: [400, 150]
+    t0_search_before_onset_ms: 300   # onset time t0 is fitted inside this range
+    t0_search_after_onset_ms: 60
+    duration_bounds_s: [0.2, 3.0]    # movement duration T is fitted inside this range
+    grid_t0_points: 25               # coarse grid search before the least-squares refinement
+    grid_duration_points: 40
+    max_relative_duration_std: 0.35  # fit counts as ill-conditioned if std(T)/T is larger
+    min_progress: 0.02               # need the hand to have covered >= 2 % of the distance
+    free_target_min_progress: 0.15   # the free-target fit needs more of the movement
+    loss: linear                     # scipy least_squares loss (linear | soft_l1)
+    # Re-planning variant: never plan to cover the remaining distance in less
+    # than this (a real hand cannot jump to the target instantly).
+    replan_min_remaining_ms: 100
+
+# -----------------------------------------------------------------------------
+# Machine-learning models.
+# -----------------------------------------------------------------------------
+ml:
+  # Decided BEFORE looking at any test result: the headline ML model.
+  headline: gru
+  history_ms: 200            # input window (converted to samples using the session fps)
+  features:
+    absolute_position: true  # ablation flag: false removes the current absolute position
+    target: relative         # relative (target - current position) | none
+  models:
+    gru:                     # small recurrent network (primary ML model)
+      enabled: true
+      kind: recurrent
+      cell: gru              # gru | lstm
+      num_layers: 1
+      hidden_size: [32, 64]  # lists = values tried in cross-validation
+      dropout: [0.0]
+      head_hidden: 64
+    mlp:                     # plain feed-forward network (accelerator-friendly)
+      enabled: true
+      kind: mlp
+      hidden_sizes: [[64, 64], [128, 128]]
+      dropout: [0.0, 0.1]
+    gp:                      # Gaussian-process regression baseline (scikit-learn)
+      enabled: true
+      kind: gp
+      max_train_points: 1500 # GPs scale as n^3, so training points are subsampled
+      length_scale: 1.0
+      noise_level: 0.1
+      n_restarts_optimizer: 1
+  training:
+    seeds: [0, 1, 2, 3, 4]   # every model is trained once per seed
+    ensemble: true           # headline ML prediction = average of the seed models
+    cv_folds: 5              # grouped (by trial) cross-validation on the development set
+    max_epochs: 300
+    patience: 25             # early stopping (only inside cross-validation)
+    batch_size: 256
+    learning_rate: 0.001
+    weight_decay: 0.0001
+    loss: smooth_euclidean   # Euclidean distance, smoothed near 0 so gradients exist
+    smooth_epsilon_cm: 0.01
+    # Each horizon's error is divided by the zero-motion error at that horizon
+    # (from the training data) so that 50 ms counts as much as 500 ms.
+    horizon_weighting: inverse_baseline   # inverse_baseline | equal
+    torch_threads: 1         # 1 thread = fully repeatable results on the CPU
+  augmentation:              # training split only
+    enabled: true
+    copies: 2                # extra copies of every training trial
+    position_noise_cm: 0.05  # tiny jitter added to input positions
+    speed_scale_range: [0.9, 1.1]   # mild time stretching of whole trials
+  export:
+    onnx_opset: 18
+    parity_tolerance: 1.0e-4 # max |ONNX - PyTorch| allowed (in normalised output units)
+
+# Train/test split: by WHOLE TRIALS (or participants), never by frames.
+split:
+  test_fraction: 0.3
+  group_by: trial            # trial | participant
+  stratify_by: [speed_condition, target_id]
+
+# -----------------------------------------------------------------------------
+# Evaluation and statistics.
+# -----------------------------------------------------------------------------
+evaluation:
+  # movement_strict: prediction made inside [onset, offset] and t+h <= offset  (PRIMARY)
+  # movement_any_target: prediction made inside [onset, offset], t+h anywhere in the recording
+  # whole_trial: every frame that has history and ground truth
+  windows: [movement_strict, movement_any_target, whole_trial]
+  primary_window: movement_strict
+  bootstrap_samples: 5000    # resamples of whole trials for confidence intervals
+  ci_level: 0.95
+  alpha: 0.05                # significance level (after Holm correction)
+  allow_mixed_synthetic: false   # never mix synthetic and real data unless forced
+  example_horizons_ms: [50, 100, 200]
+  speed_plot_horizon_ms: 200
+  min_trials_for_tests: 5    # fewer paired trials -> no significance test is reported
+
+benchmark:
+  duration_s: 20
+  warmup_frames: 30
+  predictor_iterations: 2000
+
+demo:
+  horizon_ms: 200
+  target_id: null            # which calibrated target the minimum-jerk model aims for
+  display: auto              # auto | window | headless
+  output_video: null         # e.g. demo.mp4 (only written if given)
+  error_window_s: 2.0        # rolling error readout
+
+# -----------------------------------------------------------------------------
+# Synthetic data: ONLY for tests, demos and `handpredict selftest`.
+# Synthetic sessions are labelled in file names and contents and are never
+# mixed with real data.
+# -----------------------------------------------------------------------------
+synthetic:
+  participant_id: SYN01
+  cm_per_px: 0.08
+  start_px: [330, 360]
+  start_jitter_px: 12
+  targets_px:
+    T1: [750, 160]
+    T2: [800, 360]
+    T3: [750, 560]
+  endpoint_scatter_cm: 1.0
+  reaction_time_s: [0.15, 0.35]     # delay between "GO" and movement onset
+  durations_s:
+    slow: [1.2, 1.6]
+    medium: [0.75, 1.0]
+    fast: [0.45, 0.6]
+  curvature_fraction: [0.0, 0.08]   # path bows sideways by up to 8 % of the distance
+  asymmetry: [0.0, 0.25]            # velocity peak shifted earlier than in minimum jerk
+  timing_jitter_ms: 0.3
+  dropped_frame_probability: 0.002
+  realtime: false                   # true = pace frames like a real camera
