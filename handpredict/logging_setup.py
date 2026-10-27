@@ -31,8 +31,9 @@ def setup_logging(verbose: bool = False, log_file: str | Path | None = None) -> 
         add_log_file(log_file)
 
     # Third-party libraries are chatty at DEBUG level.
-    for noisy in ("matplotlib", "PIL", "urllib3", "absl", "picamera2", "torch", "onnxscript"):
+    for noisy in ("matplotlib", "PIL", "urllib3", "absl", "picamera2", "torch", "onnxscript", "onnx_ir", "onnx"):
         logging.getLogger(noisy).setLevel(logging.WARNING)
+    logging.getLogger("torch.onnx").setLevel(logging.ERROR)  # exporter chatter about optional packages
 
 
 def add_log_file(log_file: str | Path) -> None:

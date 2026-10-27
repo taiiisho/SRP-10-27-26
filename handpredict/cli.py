@@ -345,7 +345,49 @@ def _add_replay_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--detector", required=True, choices=["mediapipe", "hailo", "synthetic"])
 
 
+# -----------------------------------------------------------------------------
+# build-dataset / train
+# -----------------------------------------------------------------------------
+@command("build-dataset", "merge sessions into a processed dataset (kinematics, segmentation, train/test split)")
+def cmd_build_dataset(args, cfg) -> int:
+    from .dataset import build_dataset
+
+    out = build_dataset(
+        cfg, raw_dir=args.raw_dir, session_dirs=args.sessions, name=args.name, out_root=args.out_root,
+        allow_mixed_synthetic=args.allow_mixed_synthetic or None, resplit=args.resplit, plots=not args.no_plots,
+    )
+    print(out)
+    return 0
+
+
+def _add_build_dataset_args(p: argparse.ArgumentParser) -> None:
+    p.add_argument("--raw-dir", help="folder with session folders (default: paths.raw_dir)")
+    p.add_argument("--sessions", nargs="*", help="only these session folders")
+    p.add_argument("--name", help="dataset name (default: main, or synthetic for synthetic data)")
+    p.add_argument("--out-root", help="where datasets are written (default: paths.processed_dir)")
+    p.add_argument("--allow-mixed-synthetic", action="store_true", help="DANGER: allow synthetic and real data together")
+    p.add_argument("--resplit", action="store_true", help="make a NEW train/test split (old test results become incomparable)")
+    p.add_argument("--no-plots", action="store_true", help="skip the per-trial segmentation plots")
+
+
+@command("train", "train the ML predictors on the development trials and export them to ONNX")
+def cmd_train(args, cfg) -> int:
+    from .ml.pipeline import train_all
+
+    out = train_all(cfg, args.dataset, models_root=args.models_root, model_names=args.models)
+    print(out)
+    return 0
+
+
+def _add_train_args(p: argparse.ArgumentParser) -> None:
+    p.add_argument("--dataset", default="data/processed/main", help="processed dataset folder")
+    p.add_argument("--models", nargs="*", help="only these models (default: all enabled in ml.models)")
+    p.add_argument("--models-root", help="where models are written (default: paths.models_dir)")
+
+
 ARGUMENT_BUILDERS = {
+    "build-dataset": _add_build_dataset_args,
+    "train": _add_train_args,
     "download-models": _add_download_args,
     "check-hardware": _add_check_args,
     "calibrate": _add_calibrate_args,
