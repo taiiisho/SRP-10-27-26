@@ -30,6 +30,8 @@ class SyntheticSource(FrameSource):
         self.seed = cfg["study"]["seed"] if seed is None else seed
         self.rng = np.random.default_rng(self.seed)
         self.render = render
+        # In real-time mode the synthetic camera behaves like a live one.
+        self.is_live = bool(self.syn.get("realtime", False))
         self._t_s = 0.0
         self._index = 0
         self._spec: ReachSpec | None = None
@@ -70,7 +72,7 @@ class SyntheticSource(FrameSource):
         while self.rng.random() < self.syn["dropped_frame_probability"]:
             self._t_s += interval
         jitter = self.rng.normal(0.0, self.syn["timing_jitter_ms"] / 1000.0)
-        t_capture = max(self._t_s + jitter, self._t_s - 0.4 * interval)
+        t_capture = max(self._t_s + jitter, self._t_s - 0.4 * interval, 0.0)
         if self.syn.get("realtime", False):
             time.sleep(interval)
         xy = self._true_position(t_capture)

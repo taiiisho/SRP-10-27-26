@@ -46,6 +46,14 @@ camera:
     lens_position_dioptres: 1.0   # 1 / distance in metres -> 1.0 = focused at 1 m
   settle_s: 1.0              # let auto-exposure / white balance settle before locking
   buffer_count: 6
+  # Camera placement: a CONTROLLED VARIABLE. Measure it with the tape once and
+  # keep it identical; it is stored in every session.json and compared when
+  # sessions are merged.
+  pose:
+    distance_cm: 100         # lens to the plane the hand moves in
+    height_cm: null          # lens height above the table
+    tilt_deg: null           # 0 = looking straight down / straight at the plane
+    notes: ""
   opencv_device: 0           # /dev/video0 for USB webcams
   opencv_fourcc: MJPG        # most webcams only reach high fps with MJPG
   opencv_api: any            # any | v4l2
@@ -108,8 +116,9 @@ recording:
   pre_roll_s: 0.5            # recorded BEFORE "GO": a still baseline for onset detection
   duration_s: 2.5            # recorded AFTER "GO"
   stop_when_settled: false   # true: stop early once the hand rests at the target
-  settle_speed_cm_s: 3.0
-  settle_time_s: 0.3
+  settle_speed_cm_s: 6.0     # "at rest" = slower than this (must be above a still hand's jitter)
+  settle_time_s: 0.1         # ... for this long, inside the target region
+  post_settle_s: 0.6         # keep recording after settling: ground truth for the 500 ms horizon
   max_duration_s: 6.0        # hard limit when stop_when_settled is true
   max_queue_frames: 400      # frames waiting for the detector (memory cap, ~1.1 GB at 720p)
   max_gap_frames: 3          # gaps of <= 3 missing frames are interpolated and flagged

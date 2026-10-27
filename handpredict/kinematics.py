@@ -49,13 +49,46 @@ class KinematicState:
         return np.linalg.norm(self.velocity, axis=1)
 
 
+class FilterStepper(Protocol):
+    """Online form of a causal filter: feed one sample at a time, get the current estimate."""
+
+    def update(self, t: float, z: np.ndarray, measured: bool) -> tuple[np.ndarray, np.ndarray, np.ndarray, bool]:
+        """Returns (position, velocity, acceleration, used_measurement); NaN before the first detection."""
+        ...
+
+
 class CausalFilter(Protocol):
-    """Anything with a ``run`` method that turns measurements into a KinematicState causally."""
+    """A filter that can run online (``new_state``) or over a whole trial (``run``)."""
 
     name: str
 
+    def new_state(self) -> FilterStepper:
+        ...
+
     def run(self, t: np.ndarray, z: np.ndarray, measured: np.ndarray) -> KinematicState:
         ...
+
+
+def run_stepper(filt: CausalFilter, t: np.ndarray, z: np.ndarray, measured: np.ndarray) -> KinematicState:
+    """Run a filter over a whole trial by feeding samples one by one, in time order.
+
+    Analysis (whole trials) and the live demo (one frame at a time) both go
+    through ``FilterStepper.update``, so they give exactly the same numbers,
+    and the output at sample i can only depend on samples 0..i.
+    """
+    t, z, measured = _check_inputs(t, z, measured)
+    n = len(t)
+    pos = np.full((n, 2), np.nan)
+    vel = np.full((n, 2), np.nan)
+    acc = np.full((n, 2), np.nan)
+    updated = np.zeros(n, dtype=bool)
+    stepper = filt.new_state()
+    for i in range(n):
+        pos[i], vel[i], acc[i], updated[i] = stepper.update(float(t[i]), z[i], bool(measured[i]))
+    return KinematicState(pos, vel, acc, updated)
+
+
+_NAN2 = np.full(2, np.nan)
 
 
 # -----------------------------------------------------------------------------
@@ -102,43 +135,49 @@ class KalmanCAFilter:
             [[d5 / 20.0, d4 / 8.0, d3 / 6.0], [d4 / 8.0, d3 / 3.0, d2 / 2.0], [d3 / 6.0, d2 / 2.0, dt]]
         )
 
-    def run(self, t: np.ndarray, z: np.ndarray, measured: np.ndarray) -> KinematicState:
-        t, z, measured = _check_inputs(t, z, measured)
-        n = len(t)
-        pos = np.full((n, 2), np.nan)
-        vel = np.full((n, 2), np.nan)
-        acc = np.full((n, 2), np.nan)
-        updated = np.zeros(n, dtype=bool)
+    def new_state(self) -> "_KalmanStepper":
+        return _KalmanStepper(self)
 
-        state: np.ndarray | None = None  # shape (3, 2): rows = p, v, a; columns = x, y
-        cov: np.ndarray | None = None  # 3x3, identical for both axes (same model and noise)
-        t_prev = 0.0
-        for i in range(n):
-            if state is None:
-                if not measured[i]:
-                    continue  # nothing is known before the first detection
-                state = np.zeros((3, 2))
-                state[0] = z[i]
-                cov = self.p0.copy()
-                updated[i] = True
-            else:
-                dt = float(t[i] - t_prev)
-                if dt < 0:
-                    raise ValueError("timestamps must be increasing")
-                f = self._transition(dt)
-                state = f @ state
-                cov = f @ cov @ f.T + self._process_noise(dt)
-                if measured[i]:
-                    # Kalman gain: how far to move towards the measurement.
-                    innovation_var = cov[0, 0] + self.r
-                    gain = cov[:, 0] / innovation_var
-                    state = state + np.outer(gain, z[i] - state[0])
-                    cov = cov - np.outer(gain, cov[0, :])
-                    cov = 0.5 * (cov + cov.T)
-                    updated[i] = True
-            t_prev = float(t[i])
-            pos[i], vel[i], acc[i] = state[0], state[1], state[2]
-        return KinematicState(pos, vel, acc, updated)
+    def run(self, t: np.ndarray, z: np.ndarray, measured: np.ndarray) -> KinematicState:
+        return run_stepper(self, t, z, measured)
+
+
+class _KalmanStepper:
+    """The running estimate of one Kalman filter (one per trial / live session)."""
+
+    def __init__(self, params: KalmanCAFilter) -> None:
+        self.p = params
+        self.state: np.ndarray | None = None  # shape (3, 2): rows = p, v, a; columns = x, y
+        self.cov: np.ndarray | None = None  # 3x3, identical for both axes (same model and noise)
+        self.t_prev = 0.0
+
+    def update(self, t: float, z: np.ndarray, measured: bool):
+        measured = bool(measured) and bool(np.all(np.isfinite(z)))
+        used = False
+        if self.state is None:
+            if not measured:
+                return _NAN2, _NAN2, _NAN2, False  # nothing is known before the first detection
+            self.state = np.zeros((3, 2))
+            self.state[0] = z
+            self.cov = self.p.p0.copy()
+            used = True
+        else:
+            dt = float(t - self.t_prev)
+            if dt < 0:
+                raise ValueError("timestamps must be increasing")
+            f = self.p._transition(dt)
+            self.state = f @ self.state
+            self.cov = f @ self.cov @ f.T + self.p._process_noise(dt)
+            if measured:
+                # Kalman gain: how far to move towards the measurement.
+                innovation_var = self.cov[0, 0] + self.p.r
+                gain = self.cov[:, 0] / innovation_var
+                self.state = self.state + np.outer(gain, z - self.state[0])
+                self.cov = self.cov - np.outer(gain, self.cov[0, :])
+                self.cov = 0.5 * (self.cov + self.cov.T)
+                used = True
+        self.t_prev = float(t)
+        return self.state[0].copy(), self.state[1].copy(), self.state[2].copy(), used
 
 
 # -----------------------------------------------------------------------------
@@ -155,32 +194,38 @@ class CausalPolyfitFilter:
         self.window = int(window)
         self.order = int(order)
 
+    def new_state(self) -> "_PolyfitStepper":
+        return _PolyfitStepper(self)
+
     def run(self, t: np.ndarray, z: np.ndarray, measured: np.ndarray) -> KinematicState:
-        t, z, measured = _check_inputs(t, z, measured)
-        n = len(t)
-        pos = np.full((n, 2), np.nan)
-        vel = np.full((n, 2), np.nan)
-        acc = np.full((n, 2), np.nan)
-        updated = measured.copy()
-        recent: list[int] = []  # indices of the most recent measured samples (all <= i)
-        for i in range(n):
-            if measured[i]:
-                recent.append(i)
-                if len(recent) > self.window:
-                    recent.pop(0)
-            if not recent:
-                continue
-            idx = np.array(recent)
-            order = min(self.order, len(idx) - 1)
-            # Time relative to "now", so the polynomial's coefficients are the
-            # position, velocity and acceleration/2 at the current time.
-            tau = t[idx] - t[i]
-            design = np.vander(tau, order + 1, increasing=True)
-            coef, *_ = np.linalg.lstsq(design, z[idx], rcond=None)
-            pos[i] = coef[0]
-            vel[i] = coef[1] if order >= 1 else 0.0
-            acc[i] = 2.0 * coef[2] if order >= 2 else 0.0
-        return KinematicState(pos, vel, acc, updated)
+        return run_stepper(self, t, z, measured)
+
+
+class _PolyfitStepper:
+    def __init__(self, params: CausalPolyfitFilter) -> None:
+        self.p = params
+        self.recent_t: list[float] = []  # the most recent measured samples (all in the past)
+        self.recent_z: list[np.ndarray] = []
+
+    def update(self, t: float, z: np.ndarray, measured: bool):
+        measured = bool(measured) and bool(np.all(np.isfinite(z)))
+        if measured:
+            self.recent_t.append(float(t))
+            self.recent_z.append(np.array(z, dtype=float))
+            if len(self.recent_t) > self.p.window:
+                self.recent_t.pop(0)
+                self.recent_z.pop(0)
+        if not self.recent_t:
+            return _NAN2, _NAN2, _NAN2, False
+        order = min(self.p.order, len(self.recent_t) - 1)
+        # Time relative to "now", so the polynomial's coefficients are the
+        # position, velocity and acceleration/2 at the current time.
+        tau = np.asarray(self.recent_t) - t
+        design = np.vander(tau, order + 1, increasing=True)
+        coef, *_ = np.linalg.lstsq(design, np.asarray(self.recent_z), rcond=None)
+        vel = coef[1] if order >= 1 else np.zeros(2)
+        acc = 2.0 * coef[2] if order >= 2 else np.zeros(2)
+        return coef[0].copy(), np.array(vel), np.array(acc), measured
 
 
 def make_filter(cfg: Mapping) -> CausalFilter:

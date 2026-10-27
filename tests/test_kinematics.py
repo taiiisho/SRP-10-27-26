@@ -54,6 +54,19 @@ def test_filter_ignores_unmeasured_samples(filt, rng):
     np.testing.assert_array_equal(a.position, b.position)
 
 
+@pytest.mark.parametrize("filt", FILTERS, ids=lambda f: f.name)
+def test_online_stepper_matches_whole_trial_run(filt, rng):
+    """Frame-by-frame use (live demo) gives exactly the same numbers as the analysis."""
+    t, xy, measured = _noisy_reach(rng)
+    batch = filt.run(t, xy, measured)
+    stepper = filt.new_state()
+    for i in range(len(t)):
+        p, v, a, used = stepper.update(t[i], xy[i], measured[i])
+        np.testing.assert_array_equal(p, batch.position[i])
+        np.testing.assert_array_equal(v, batch.velocity[i])
+        assert used == batch.updated[i]
+
+
 def test_polyfit_is_exact_on_quadratic_with_uneven_frame_times(rng):
     t = np.cumsum(rng.uniform(0.010, 0.025, 60))
     a = np.array([30.0, -12.0])

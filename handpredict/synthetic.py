@@ -166,6 +166,42 @@ def make_trial_data(
     return TrialData(context, t, filled * cm_per_px, detected, interpolated)
 
 
+def render_hand_video(
+    hand_image_bgr: np.ndarray,
+    out_path: str,
+    path_px: np.ndarray,
+    fps: float,
+    size: tuple[int, int] = (1280, 720),
+    hand_height_px: int = 240,
+    codec: str = "mp4v",
+) -> None:
+    """Write a SEMI-SYNTHETIC video: a real hand photo moved along ``path_px``.
+
+    Used to test the real detector (MediaPipe) on a movement whose true path
+    is known exactly. The photo's centre follows ``path_px`` (one row per frame).
+    """
+    import cv2
+
+    scale = hand_height_px / hand_image_bgr.shape[0]
+    hand = cv2.resize(hand_image_bgr, None, fx=scale, fy=scale, interpolation=cv2.INTER_AREA)
+    hh, hw = hand.shape[:2]
+    width, height = size
+    writer = cv2.VideoWriter(str(out_path), cv2.VideoWriter_fourcc(*codec), fps, (width, height))
+    if not writer.isOpened():
+        raise RuntimeError(f"cannot write {out_path}")
+    try:
+        for cx, cy in np.asarray(path_px, dtype=float):
+            canvas = np.full((height, width, 3), 90, dtype=np.uint8)
+            x0, y0 = int(round(cx - hw / 2)), int(round(cy - hh / 2))
+            xs, ys = max(x0, 0), max(y0, 0)
+            xe, ye = min(x0 + hw, width), min(y0 + hh, height)
+            if xe > xs and ye > ys:
+                canvas[ys:ye, xs:xe] = hand[ys - y0 : ye - y0, xs - x0 : xe - x0]
+            writer.write(canvas)
+    finally:
+        writer.release()
+
+
 def trial_plan(speeds, targets, repetitions: int, rng: np.random.Generator | None) -> list[tuple[str, str]]:
     """Every (speed, target) combination ``repetitions`` times; shuffled if an rng is given."""
     plan = [(s, tgt) for _ in range(repetitions) for s in speeds for tgt in targets]

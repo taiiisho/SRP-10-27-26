@@ -44,6 +44,9 @@ class FrameSource(abc.ABC):
 
     name: str = "base"
     is_synthetic: bool = False
+    # Live cameras keep producing frames whether or not we read them, so a
+    # recorder must never block them; files and synthetic sources can wait.
+    is_live: bool = False
 
     def __init__(self, width: int, height: int, fps: float) -> None:
         self.width = int(width)
