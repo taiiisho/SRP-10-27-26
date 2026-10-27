@@ -90,6 +90,12 @@ class OpenCVCameraSource(FrameSource):
         self._index += 1
         return frame
 
+    def flush(self) -> None:
+        """The driver keeps a couple of old frames; their arrival time would look like 'now'."""
+        if self._cap is not None:
+            for _ in range(2):  # CAP_PROP_BUFFERSIZE is set to 2
+                self._cap.grab()
+
     def close(self) -> None:
         if self._cap is not None:
             self._cap.release()

@@ -135,6 +135,11 @@ class Picamera2Source(FrameSource):
                     "Check camera.sensor_output_size and the exposure time.", actual_fps, self.nominal_fps,
                 )
 
+    def flush(self) -> None:
+        """Picamera2 keeps the last finished frame; drop it so the trial starts with a fresh one."""
+        if self._picam2 is not None:
+            self._picam2.capture_request().release()  # VERIFY ON HARDWARE
+
     def close(self) -> None:
         if self._picam2 is not None:
             try:

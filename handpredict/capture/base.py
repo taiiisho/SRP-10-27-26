@@ -78,6 +78,9 @@ class FrameSource(abc.ABC):
     def on_trial_start(self, trial_info: dict[str, Any]) -> None:
         """Called by the recorder when a trial starts. Real cameras ignore it."""
 
+    def flush(self) -> None:
+        """Throw away frames that were captured before now (stale frames waiting in a buffer)."""
+
     def __enter__(self) -> "FrameSource":
         self.open()
         return self

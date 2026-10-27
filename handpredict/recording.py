@@ -192,6 +192,8 @@ class TrialRecorder:
         state: dict[str, Any] = {"overflow": 0, "go_t_ns": None, "reason": None, "error": None}
 
         self.detector.reset()
+        if live:
+            self.source.flush()  # no frames from before the trial (their timing would be wrong)
         self.source.on_trial_start({**trial_info, "pre_roll_s": pre_roll})
 
         def capture_loop() -> None:
