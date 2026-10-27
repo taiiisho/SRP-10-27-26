@@ -288,8 +288,10 @@ handpredict evaluate --dataset data/processed/main  # the test set -> results/ma
    (onset) and purple line (offset) should bracket the movement. If they don't, adjust the thresholds in
    `kinematics.segmentation` and rebuild.
 2. **`train`** uses only development trials: cross-validation chooses the network size, then 5 copies with
-   different random seeds are trained and averaged. A full default run took about 10-25 minutes on a 4-core
-   laptop for ~30 trials (more on the Pi). Copy `data/processed/` to the laptop, train, copy `models/` back.
+   different random seeds are trained and averaged. Measured on a 4-core x86 computer: a full default run on
+   19 development trials (3 cross-validation folds) took 11 minutes; with 30-45 trials and the default 5 folds
+   expect roughly 15-25 minutes (an estimate). The Pi is slower (not measured). Copy `data/processed/` to the
+   laptop, train, copy `models/` back.
 3. **`evaluate`** scores every model on exactly the same test frames and writes `results/main/`:
    `summary.md`, `predictions.csv`, `trial_metrics.csv`, `model_metrics.csv`, `paired_tests.csv`,
    `crossover.json` and `plots/`.
