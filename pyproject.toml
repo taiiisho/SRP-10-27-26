@@ -1,0 +1,63 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "handpredict"
+version = "0.1.0"
+description = "Physics-based vs edge-AI prediction of hand movements on a Raspberry Pi 5 + AI HAT+ 2"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "SRP hand-trajectory team" }]
+# The base install is enough to record data, build the dataset and evaluate
+# exported (ONNX) models. It works on a laptop without any Hailo packages.
+# Version ranges are tested lower bounds plus "next major version" caps; the
+# exact versions used for a run are written into every session.json and every
+# results folder, and requirements-lock.txt pins the full laptop environment.
+dependencies = [
+    "numpy>=1.26,<3",
+    "scipy>=1.11,<2",
+    "pandas>=2.1,<4",
+    "matplotlib>=3.8,<4",
+    "pyyaml>=6.0,<7",
+    "onnxruntime>=1.17,<2",
+    # The same OpenCV distribution that MediaPipe depends on, so that only one
+    # package provides `cv2` (two OpenCV packages in one environment overwrite
+    # each other). It includes the GUI functions used by the calibration tool.
+    "opencv-contrib-python>=4.9,<6",
+]
+
+[project.optional-dependencies]
+# CPU hand-landmark detector (works on laptops and on the Pi).
+mediapipe = ["mediapipe>=0.10.14,<2"]
+# Training the ML predictors and exporting them to ONNX.
+ml = [
+    "torch>=2.2,<3",
+    "scikit-learn>=1.4,<2",
+    "onnx>=1.15,<2",
+    "onnxscript>=0.2,<1",
+]
+dev = ["pytest>=8,<10"]
+all = ["handpredict[mediapipe,ml,dev]"]
+# NOTE: picamera2 and the Hailo runtime (hailo_platform) are NOT pip packages
+# here. On the Pi they come from apt (python3-picamera2, hailo-h10-all); create
+# the virtual environment with --system-site-packages so Python can see them.
+
+[project.scripts]
+handpredict = "handpredict.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["handpredict*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+markers = [
+    "slow: end-to-end tests that take more than a few seconds",
+    "mediapipe: needs the mediapipe package and the downloaded hand_landmarker.task model",
+]
+filterwarnings = [
+    "ignore::DeprecationWarning:torch.*",
+    "ignore::FutureWarning:torch.*",
+]
