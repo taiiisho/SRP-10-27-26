@@ -61,6 +61,9 @@ class LandmarkDetector(abc.ABC):
     def reset(self) -> None:
         """Forget tracking state (called at the start of every trial)."""
 
+    def set_search_region(self, center_px, size_px: float | None = None) -> None:
+        """Hint where the hand starts (the calibrated start region). Most detectors ignore it."""
+
     def close(self) -> None:
         """Release resources (model, accelerator)."""
 

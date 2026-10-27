@@ -130,6 +130,8 @@ def run_recording_session(
 
     source = make_source(cfg, source_kind, video_path=video, seed=seed)
     detector = make_detector(cfg, detector_backend)
+    if calibration is not None and calibration.start_region is not None:
+        detector.set_search_region(calibration.start_region.center_px)  # where trials begin (Hailo tracking)
     with source, detector:
         session = SessionWriter(
             cfg, participant_id, source, detector, calibration,
@@ -205,6 +207,8 @@ def replay_session(cfg: Mapping, session_dir: str | Path, detector_backend: str,
     detector = make_detector(cfg, detector_backend)
     first_source = VideoFileSource(trials[0].video_path, fps=original.fps)
     calibration = original.calibration
+    if calibration is not None and calibration.start_region is not None:
+        detector.set_search_region(calibration.start_region.center_px)
     session_id = f"{original.session_id}_replay_{detector.name}"
     with detector:
         session = SessionWriter(

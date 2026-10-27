@@ -38,7 +38,12 @@ ml = [
     "onnx>=1.15,<2",
     "onnxscript>=0.2,<1",
 ]
-dev = ["pytest>=8,<10"]
+dev = [
+    "pytest>=8,<10",
+    # Runs MediaPipe's hand-landmark network on the CPU so the Hailo detector's
+    # cropping/decoding/tracking can be tested without the AI HAT+ 2.
+    "ai-edge-litert>=2.0,<3",
+]
 all = ["handpredict[mediapipe,ml,dev]"]
 # NOTE: picamera2 and the Hailo runtime (hailo_platform) are NOT pip packages
 # here. On the Pi they come from apt (python3-picamera2, hailo-h10-all); create

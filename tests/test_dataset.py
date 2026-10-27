@@ -101,3 +101,17 @@ def test_train_pipeline_never_loads_test_trials(cfg, dataset_dir, tmp_path, monk
     summary = pd.read_json(out / "training_summary.json", typ="series")
     assert summary["n_test_trials_untouched"] == len(test_ids)
     assert not set(summary["dev_trials"]) & test_ids
+
+    # Hailo export step 1: one flat input of fixed size; must reproduce the ONNX ensemble exactly.
+    import onnxruntime as ort
+
+    from handpredict.ml.hailo import export_onnx_for_hailo
+
+    export_dir = export_onnx_for_hailo(tiny, out, "mlp")
+    calib = np.load(export_dir / "calibration.npy")
+    flat = ort.InferenceSession(str(export_dir / "mlp_flat.onnx"), providers=["CPUExecutionProvider"])
+    mlp = predictors["mlp"]
+    w = mlp.spec.n_samples * 3
+    expected = mlp.run(calib[:20, :w].reshape(20, mlp.spec.n_samples, 3), calib[:20, w:])
+    got = np.concatenate([flat.run(None, {"flat": calib[i : i + 1]})[0] for i in range(20)]).reshape(expected.shape)
+    np.testing.assert_allclose(got, expected, atol=1e-5)

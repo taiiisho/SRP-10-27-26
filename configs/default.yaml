@@ -93,6 +93,10 @@ detector:
     # whole frame, or MediaPipe on the CPU (most robust, but uses the CPU).
     reacquire: start_region   # start_region | full_frame | mediapipe
     reacquire_size_px: 360    # side of the square search crop around the start region
+    # While searching, try the crop at these rotations and sizes (the network
+    # needs an upright hand of about the right size); the best one wins.
+    search_angles_deg: [0, 90, -90, 180]
+    search_scales: [0.75, 1.0, 1.33]
     # Names of the HEF outputs. null = recognise them by shape and value range
     # (run `handpredict check-hardware --hef ...` to print the real names).
     output_map: null

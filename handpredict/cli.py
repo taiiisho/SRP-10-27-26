@@ -426,7 +426,92 @@ def _add_selftest_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--full", action="store_true", help="use the full training budget from the config (slow)")
 
 
+# -----------------------------------------------------------------------------
+# demo / benchmark / export-hailo
+# -----------------------------------------------------------------------------
+@command("demo", "live view with the physics and ML predictions drawn on the camera image")
+def cmd_demo(args, cfg) -> int:
+    from .live_demo import run_demo
+
+    result = run_demo(
+        cfg, source_kind=args.source, detector_backend=args.detector, calibration_path=args.calibration,
+        models_dir=args.models_dir, horizon_ms=args.horizon_ms, target_id=args.target, display=args.display,
+        output_video=args.output, duration_s=args.duration, video=args.video,
+    )
+    log.info("Demo finished: %s", result)
+    return 0
+
+
+def _add_demo_args(p: argparse.ArgumentParser) -> None:
+    p.add_argument("--calibration", help="calibration JSON (needed for centimetres and the target)")
+    p.add_argument("--models-dir", help="trained models, e.g. models/main (without it only physics is shown)")
+    p.add_argument("--source", choices=["picamera2", "opencv", "video", "synthetic"])
+    p.add_argument("--video", help="video file when --source video")
+    p.add_argument("--detector", choices=["mediapipe", "hailo", "synthetic"])
+    p.add_argument("--horizon-ms", type=float, help="horizon to draw (default demo.horizon_ms)")
+    p.add_argument("--target", help="target id the minimum-jerk model aims for")
+    p.add_argument("--display", choices=["auto", "window", "headless"])
+    p.add_argument("--output", help="ALSO write the overlay video here (shows the participant)")
+    p.add_argument("--duration", type=float, help="stop after this many seconds")
+
+
+@command("benchmark", "time every stage on this computer: predictors, detection, full pipeline")
+def cmd_benchmark(args, cfg) -> int:
+    from .benchmark import benchmark_pipeline, benchmark_predictors, write_report
+
+    iterations = args.iterations or int(cfg["benchmark"]["predictor_iterations"])
+    table, extra = benchmark_predictors(cfg, args.models_dir, iterations, args.ml_hef)
+    pipeline = None
+    if not args.predictors_only:
+        pipeline = benchmark_pipeline(
+            cfg, args.source or cfg["camera"]["source"], args.detector or cfg["detector"]["backend"],
+            args.duration or float(cfg["benchmark"]["duration_s"]), args.models_dir, args.calibration, args.video,
+        )
+    report = write_report(Path(args.out or Path(cfg["paths"]["results_dir"]) / "benchmark"), table, pipeline, extra, cfg)
+    print(report.read_text())
+    return 0
+
+
+def _add_benchmark_args(p: argparse.ArgumentParser) -> None:
+    p.add_argument("--models-dir", help="trained models, e.g. models/main (to time the ML predictors)")
+    p.add_argument("--ml-hef", help="also time the MLP compiled for the Hailo-10H (from export-hailo)")
+    p.add_argument("--predictors-only", action="store_true", help="skip the live camera pipeline")
+    p.add_argument("--source", choices=["picamera2", "opencv", "video", "synthetic"])
+    p.add_argument("--video", help="video file when --source video")
+    p.add_argument("--detector", choices=["mediapipe", "hailo", "synthetic"])
+    p.add_argument("--calibration", help="calibration JSON (needed for the ML predictor in the pipeline)")
+    p.add_argument("--duration", type=float, help="seconds of live pipeline (default benchmark.duration_s)")
+    p.add_argument("--iterations", type=int, help="predictor calls per model (default benchmark.predictor_iterations)")
+    p.add_argument("--out", help="report folder (default results/benchmark)")
+
+
+@command("export-hailo", "export the MLP predictor for the Hailo-10H (ONNX + calibration, then compile on x86)")
+def cmd_export_hailo(args, cfg) -> int:
+    from .ml.hailo import compile_hef, export_onnx_for_hailo
+
+    export_dir = Path(args.export_dir) if args.export_dir else None
+    if args.step in ("onnx", "all"):
+        export_dir = export_onnx_for_hailo(cfg, args.models_dir, args.model, export_dir)
+    if args.step in ("compile", "all"):
+        if export_dir is None:
+            export_dir = Path(args.models_dir) / args.model / "hailo"
+        compile_hef(export_dir, args.hw_arch)
+    return 0
+
+
+def _add_export_hailo_args(p: argparse.ArgumentParser) -> None:
+    p.add_argument("--models-dir", required=True, help="trained models, e.g. models/main")
+    p.add_argument("--model", default="mlp", help="which model (only the MLP is accelerator-friendly)")
+    p.add_argument("--step", choices=["onnx", "compile", "all"], default="onnx",
+                   help="onnx: any computer; compile: x86 Linux with the Hailo Dataflow Compiler")
+    p.add_argument("--export-dir", help="folder with / for the exported files (default models/<dataset>/<model>/hailo)")
+    p.add_argument("--hw-arch", default="hailo10h", help="target accelerator (hailo10h for the AI HAT+ 2)")
+
+
 ARGUMENT_BUILDERS = {
+    "demo": _add_demo_args,
+    "benchmark": _add_benchmark_args,
+    "export-hailo": _add_export_hailo_args,
     "selftest": _add_selftest_args,
     "evaluate": _add_evaluate_args,
     "build-dataset": _add_build_dataset_args,
