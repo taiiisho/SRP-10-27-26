@@ -20,6 +20,9 @@ from typing import Mapping
 
 import numpy as np
 
+from .kinematics import fill_short_gaps
+from .trial import TrialContext, TrialData
+
 SYNTHETIC_LABEL = "synthetic"
 
 
@@ -113,6 +116,54 @@ def frame_times(
         keep[0] = True
         t = t[keep]
     return t
+
+
+def make_trial_data(
+    spec: ReachSpec,
+    cfg: Mapping,
+    rng: np.random.Generator,
+    trial_id: str,
+    speed_condition: str,
+    target_id: str,
+    session_id: str = "synthetic_session",
+    noise_px: float = 0.0,
+    miss_probability: float = 0.0,
+    total_s: float | None = None,
+    timing: bool = True,
+) -> TrialData:
+    """A complete synthetic trial in centimetres, as if recorded and detected.
+
+    ``noise_px`` / ``miss_probability`` imitate the detector; ``timing``
+    switches camera timing jitter and dropped frames on or off.
+    """
+    syn = cfg["synthetic"]
+    rec = cfg["recording"]
+    fps = float(cfg["camera"]["fps"])
+    total = total_s if total_s is not None else rec["pre_roll_s"] + rec["duration_s"]
+    jitter = syn["timing_jitter_ms"] if timing else 0.0
+    drop = syn["dropped_frame_probability"] if timing else 0.0
+    t = frame_times(rng, fps, total, jitter, drop)
+    xy_px = reach_position(spec, t)
+    if noise_px > 0:
+        xy_px = xy_px + rng.normal(0.0, noise_px, xy_px.shape)
+    detected = rng.random(len(t)) >= miss_probability
+    filled, interpolated = fill_short_gaps(t, xy_px, detected, rec["max_gap_frames"])
+    cm_per_px = float(syn["cm_per_px"])
+    context = TrialContext(
+        trial_id=trial_id,
+        session_id=session_id,
+        participant_id=syn["participant_id"],
+        speed_condition=speed_condition,
+        target_id=target_id,
+        start_xy=np.asarray(syn["start_px"], float) * cm_per_px,
+        target_xy=spec.target_px * cm_per_px,
+        units="cm",
+        fps=fps,
+        data_origin=SYNTHETIC_LABEL,
+        cm_per_px=cm_per_px,
+        extra={"reach_spec": spec.as_dict()},
+    )
+    return TrialData(context, t, filled * cm_per_px, detected, interpolated)
 
 
 def trial_plan(speeds, targets, repetitions: int, rng: np.random.Generator | None) -> list[tuple[str, str]]:

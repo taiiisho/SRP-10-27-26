@@ -178,6 +178,7 @@ physics:
     - euler_constant_acceleration    # Newton-Euler stepping with constant a
     - minimum_jerk_closed            # Flash & Hogan polynomial, closed form
     - minimum_jerk_euler             # same fit, rolled forward with Euler steps (HEADLINE)
+    - minimum_jerk_replan            # extra row: re-planned from the measured state (Hoff & Arbib 1993)
     - minimum_jerk_free_target       # ablation: also fits the end point
   euler:
     dt_ms: 1.0                       # internal Euler step for the constant-acceleration model
@@ -185,7 +186,10 @@ physics:
   minimum_jerk:
     euler_dt_ms: 0.1                 # internal step for the Euler-rolled minimum-jerk model
     min_samples_after_onset: 6       # fewer samples -> fall back to constant velocity
-    baseline_window_ms: 150          # start point = median position in this window before onset
+    # Start point x0 = median position from 400 ms to 150 ms before the detected
+    # onset. The onset is detected ~60-180 ms late (the speed has to pass the
+    # threshold first), so the last 150 ms may already contain movement.
+    baseline_window_ms: [400, 150]
     t0_search_before_onset_ms: 300   # onset time t0 is fitted inside this range
     t0_search_after_onset_ms: 60
     duration_bounds_s: [0.2, 3.0]    # movement duration T is fitted inside this range
@@ -195,6 +199,9 @@ physics:
     min_progress: 0.02               # need the hand to have covered >= 2 % of the distance
     free_target_min_progress: 0.15   # the free-target fit needs more of the movement
     loss: linear                     # scipy least_squares loss (linear | soft_l1)
+    # Re-planning variant: never plan to cover the remaining distance in less
+    # than this (a real hand cannot jump to the target instantly).
+    replan_min_remaining_ms: 100
 
 # -----------------------------------------------------------------------------
 # Machine-learning models.
